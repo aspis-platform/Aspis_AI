@@ -53,13 +53,11 @@ async def analyze_dog_disease_image(file: UploadFile, upload_dir: Path) -> Dict[
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # 이미지 파일을 base64로 인코딩
         with open(file_path, "rb") as image_file:
             image_data = base64.b64encode(image_file.read()).decode("utf-8")
         
         media_type = get_media_type(file_path)
         
-        # Anthropic API 요청 데이터 구성
         headers = {
             "Content-Type": "application/json",
             "x-api-key": ANTHROPIC_API_KEY,
@@ -84,8 +82,9 @@ async def analyze_dog_disease_image(file: UploadFile, upload_dir: Path) -> Dict[
                         {
                             "type": "text",
                             "text": """
-                            이 강아지 사진을 분석하고 다음 JSON 형식으로 결과를 제공해주세요:
+                            이 이미지가 강아지인지 확인한 후, 강아지라면 건강 상태를 분석하고 다음 JSON 형식으로 결과를 제공해주세요:
                             {
+                                "is_dog": true,
                                 "disease": "발견된 질병 또는 상태",
                                 "info": {
                                     "symptoms": "관찰된 증상 목록",
@@ -96,6 +95,12 @@ async def analyze_dog_disease_image(file: UploadFile, upload_dir: Path) -> Dict[
                             }
                             
                             강아지에게 특별한 문제가 없어 보이면 "disease"를 "건강함"으로 설정하세요.
+                            이미지에 강아지가 없으면 다음과 같이 응답하세요:
+                            {
+                                "is_dog": false,
+                                "message": "이미지에 강아지가 없습니다. 강아지 사진을 업로드해주세요."
+                            }
+                            
                             오직 JSON 형식으로만 답변해주세요.
                             """
                         }
@@ -104,7 +109,6 @@ async def analyze_dog_disease_image(file: UploadFile, upload_dir: Path) -> Dict[
             ]
         }
         
-        # Anthropic API에 HTTP 요청 보내기
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 ANTHROPIC_API_URL,
@@ -117,6 +121,13 @@ async def analyze_dog_disease_image(file: UploadFile, upload_dir: Path) -> Dict[
                 ai_response = response_data.get("content", [{}])[0].get("text", "")
                 analysis_result = extract_json_from_text(ai_response)
                 
+                if analysis_result.get("is_dog") == False:
+                    return {
+                        "success": False,
+                        "error": "강아지 이미지가 아닙니다",
+                        "message": analysis_result.get("message", "강아지 사진을 업로드해주세요.")
+                    }
+                
                 return {
                     "success": True,
                     "data": analysis_result,
@@ -128,6 +139,13 @@ async def analyze_dog_disease_image(file: UploadFile, upload_dir: Path) -> Dict[
                     "error": f"API 요청 실패: {response.status_code}",
                     "details": response.text
                 }
+                
+    except Exception as e:
+        return {
+            "success": False,
+            "error": "처리 중 오류 발생",
+            "details": str(e)
+        }
                 
     finally:
         if os.path.exists(file_path):
